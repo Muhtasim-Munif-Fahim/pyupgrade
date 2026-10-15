@@ -39,17 +39,39 @@ _TARGETS = (
 )
 
 
+def _except_tuple_has_parens(tokens: list[Token], i: int) -> int | None:
+    """Return index of ``(`` for a parenthesized except-type, else None.
+
+    PEP 758 allows ``except E1, E2:`` without parentheses. Searching for any
+    later ``(`` would incorrectly rewrite a following def/call.
+    """
+    j = i
+    while j < len(tokens):
+        tok = tokens[j]
+        if tok.src == ':':
+            return None
+        if tok.matches(name='OP', src='('):
+            return j
+        j += 1
+    return None
+
+
 def _fix_except(
         i: int,
         tokens: list[Token],
         *,
         at_idx: dict[int, _Target],
 ) -> None:
-    start = find_op(tokens, i, '(')
+    start = _except_tuple_has_parens(tokens, i)
+    if start is None:
+        # Unparenthesized multi-except (PEP 758): leave rewrite to per-name
+        # callbacks registered separately.
+        return
+
     func_args, end = parse_call_args(tokens, start)
 
-    for i, target in reversed(at_idx.items()):
-        tokens[slice(*func_args[i])] = [Token('NAME', target.target)]
+    for idx, target in reversed(at_idx.items()):
+        tokens[slice(*func_args[idx])] = [Token('NAME', target.target)]
 
     constant_fold_tuple(start, tokens)
 
@@ -135,7 +157,12 @@ def visit_Try(
                     at_idx[i] = target
 
             if at_idx:
+                # Parenthesized form: rewrite inside the tuple and fold.
                 func = functools.partial(_fix_except, at_idx=at_idx)
                 yield ast_to_offset(handler.type), func
+                # Unparenthesized PEP 758 form: also register per-name
+                # rewrites; _fix_except no-ops when there is no '('.
+                for elt in handler.type.elts:
+                    yield from _alias_cbs(elt, state, targets)
         elif handler.type is not None:
             yield from _alias_cbs(handler.type, state, targets)

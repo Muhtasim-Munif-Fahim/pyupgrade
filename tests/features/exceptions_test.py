@@ -287,3 +287,51 @@ except (TimeoutError, OSError): ...
 '''
 
     assert _fix_plugins(s, settings=Settings(min_version=(3, 11))) == expected
+
+
+@pytest.mark.parametrize(
+    ('s', 'expected'),
+    (
+        pytest.param(
+            'import asyncio\n'
+            'try: pass\n'
+            'except (asyncio.TimeoutError, ValueError): pass\n'
+            '\n'
+            'def f(x) -> None: pass\n',
+            'import asyncio\n'
+            'try: pass\n'
+            'except (TimeoutError, ValueError): pass\n'
+            '\n'
+            'def f(x) -> None: pass\n',
+            id='parenthesized-except-does-not-touch-following-def',
+        ),
+    ),
+)
+def test_fix_exceptions_does_not_rewrite_following_def(s, expected):
+    assert _fix_plugins(s, settings=Settings(min_version=(3, 11))) == expected
+
+
+@pytest.mark.skipif(
+    __import__('sys').version_info < (3, 14),
+    reason='PEP 758 unparenthesized except requires Python 3.14+',
+)
+@pytest.mark.parametrize(
+    ('s', 'expected'),
+    (
+        pytest.param(
+            'import asyncio\n'
+            'try: pass\n'
+            'except asyncio.TimeoutError, ValueError: pass\n'
+            '\n'
+            'def f(x) -> None: pass\n',
+            'import asyncio\n'
+            'try: pass\n'
+            'except TimeoutError, ValueError: pass\n'
+            '\n'
+            'def f(x) -> None: pass\n',
+            id='pep758-unparenthesized-except-asyncio-TimeoutError',
+        ),
+    ),
+)
+def test_fix_exceptions_pep758(s, expected):
+    assert _fix_plugins(s, settings=Settings(min_version=(3, 14))) == expected
